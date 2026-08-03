@@ -6,14 +6,14 @@ class SelectionStage extends SessionStage {
     }
 
     obtenerArticulosOrdenadosPorScore() {
-        const ordenados = [...this._Session.papers()];
-        ordenados.sort((a, b) => b.finalScore() - a.finalScore());
-        return ordenados;
+        const sortedPapers = [...this._session.papers()];
+        sortedPapers.sort((a, b) => b.finalScore() - a.finalScore());
+        return sortedPapers;
     }
 
     obtenerArticulosAceptados() {
-        return this._Session.acceptancePolicy().seleccionarArticulos(
-            this._Session.papers()
+        return this._session.acceptancePolicy().seleccionarArticulos(
+            this._session.papers()
         );
     }
 }
