@@ -1,10 +1,10 @@
 class SessionStage {
     constructor(session) {
-        this._Session = session;
+        this._session = session;
     }
 
     belongsTo(session) {
-        return this._Session === session;
+        return this._session === session;
     }
 
     canTransitionTo(nextStage) {
@@ -27,12 +27,12 @@ class SessionStage {
         throw new Error("Cannot enter bids from the current stage.");
     }
 
-    enterAssigment(paper, reviewer) {
-        throw new Error("Cannot assigment from the current stage.");
+    enterAssignment(paper, reviewer) {
+        throw new Error("Cannot assign reviewers from the current stage.");
     }
 
-    asignarRevisores() {
-        throw new Error("Cannot assigment from the current stage.");
+    assignReviewers() {
+        throw new Error("Cannot assign reviewers from the current stage.");
     }
 
     enterReview(paper, reviewer, review, score) {
@@ -40,7 +40,7 @@ class SessionStage {
     }
 
     obtenerArticulosOrdenadosPorScore() {
-        throw new Error("Cannot return sort papers from the current stage.");
+        throw new Error("Cannot return sorted papers from the current stage.");
     }
 
     obtenerArticulosAceptados() {
