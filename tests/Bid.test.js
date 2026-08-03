@@ -1,41 +1,43 @@
 const { Bid, Interests } = require("../src/Bid");
 const Paper = require("../src/Paper");
+const Reviewer = require("../src/Reviewer");
 const User = require("../src/User");
 
-let juan, julian;
-let paper01;
-let bid;
+describe("Bid", () => {
+    const buildBid = (interest = Interests.Interested) => {
+        const author = new User("Autor", "Universidad", "author@mail.com", "pass");
+        const reviewer = new Reviewer(
+            "Reviewer", "Universidad", "reviewer@mail.com", "pass"
+        );
+        const paper = new Paper("Paper", [author], author);
 
-beforeEach( ()=> {
-    juan = new User("Juan Gardey", "LIFIA, UNLP", "jgardey@lifia.ar", "123");
-    julian = new User("Julián Grigera", "LIFIA, UNLP", "jgrigera@lifia.ar", "123");
-    paper01 = new Paper("A new approach on something", [juan, julian], juan);
-    bid = new Bid(paper01, julian, Interests.Interested);
-});
+        return { bid: new Bid(paper, reviewer, interest), paper, reviewer };
+    };
 
-describe("A new Bid", ()=>{
-    it("should know its paper", ()=>{
-        expect(bid.paper()).toBe(paper01);
-    });
-    it("should know its reviewer", ()=>{
-        expect(bid.reviewer()).toBe(julian);
-    });
-    it("should know its interest level", ()=>{
-        expect(bid.interest()).toBe(Interests.Interested);
-    });
-});
+    test("reconoce la pareja paper-reviewer que representa", () => {
+        const { bid, paper, reviewer } = buildBid();
 
-describe("A Bid", ()=>{
-    it("should allow changing the interest level", ()=>{
+        expect(bid.matches(paper, reviewer)).toBe(true);
+        expect(bid.matches(paper, new Reviewer("Otro", "U", "o@mail.com", "p")))
+            .toBe(false);
+    });
+
+    test("calcula la prioridad según el interés", () => {
+        expect(buildBid(Interests.Interested).bid.priority()).toBe(2);
+        expect(buildBid(Interests.Maybe).bid.priority()).toBe(1);
+        expect(buildBid(Interests.NotInterested).bid.priority()).toBe(0);
+        expect(buildBid(Interests.Conflict).bid.priority()).toBe(0);
+    });
+
+    test("identifica conflictos y permite actualizar el interés", () => {
+        const { bid } = buildBid(Interests.Conflict);
+
+        expect(bid.hasConflict()).toBe(true);
+
         bid.setInterest(Interests.Maybe);
+
+        expect(bid.hasConflict()).toBe(false);
         expect(bid.interest()).toBe(Interests.Maybe);
-    });
-    it("should support all interest levels", ()=>{
-        bid.setInterest(Interests.NotInterested);
-        expect(bid.interest()).toBe(Interests.NotInterested);
-        bid.setInterest(Interests.Maybe);
-        expect(bid.interest()).toBe(Interests.Maybe);
-        bid.setInterest(Interests.Interested);
-        expect(bid.interest()).toBe(Interests.Interested);
+        expect(bid.priority()).toBe(1);
     });
 });
