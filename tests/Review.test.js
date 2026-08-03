@@ -1,47 +1,34 @@
 const Review = require("../src/Review");
 const User = require("../src/User");
 
-let review1;
-let user1;
+describe("Review", () => {
+    let reviewer;
+    let review;
 
-beforeEach(()=>{
-    user1 = new User("User 1", "Uni 1", "u1@mail.com", "pass");
-    review1 = new Review(user1,"Texto de review1",0)
-})
+    beforeEach(() => {
+        reviewer = new User("User 1", "Uni 1", "u1@mail.com", "pass");
+        review = new Review(reviewer, "Texto de review", 0);
+    });
 
-describe("Una revisión", () =>{
-    it("deberia tener un revisor.", () => {
-        expect(review1.reviewer()).not.toBeUndefined();
-    })
+    test("reconoce al reviewer que la realizó", () => {
+        const other = new User("User 2", "Uni 2", "u2@mail.com", "pass");
 
-    it("deberia tener un texto.", () => {
-        expect(review1.text()).not.toBeUndefined();
-    })
+        expect(review.isFrom(reviewer)).toBe(true);
+        expect(review.isFrom(other)).toBe(false);
+    });
 
-    it("deberia tener un score.", () => {
-        expect(review1.score()).not.toBeUndefined();
-    })
+    test("valida y permite actualizar el score", () => {
+        review.setScore(3);
+        expect(review.score()).toBe(3);
 
-    it("deberia tener un score entre -3 y +3", () => {
-        expect(review1.score()).toBeGreaterThan(-4)
-        expect(review1.score()).toBeLessThan(4)
+        expect(() => review.setScore(4)).toThrow("Score no permitido");
+        expect(() => new Review(reviewer, "Inválida", -4)).toThrow(
+            "Score no permitido"
+        );
+    });
 
-        let invalidScore = ()=>{review1.setScore(4)};
-        expect(invalidScore).toThrow();
-    })
-
-    it("deberia poder actualizar su score.", () => {
-        expect(review1.score()).toBe(0)
-        review1.setScore(3)
-        expect(review1.score()).toBe(3)
-    })
-
-    it("deberia poder actualizar su texto.", () => {
-        let texto1 = review1.text()
-        expect(review1.text()).toEqual(texto1)
-
-        let newText1 = "Nuevo texto1"
-        review1.setReview(newText1)
-        expect(review1.text()).toEqual(newText1)
-    })
-})
+    test("permite actualizar el texto", () => {
+        review.setReview("Nuevo texto");
+        expect(review.text()).toBe("Nuevo texto");
+    });
+});
