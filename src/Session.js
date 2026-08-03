@@ -57,27 +57,36 @@ class Session {
 
     canSubmit(paper) { return this._stage.canSubmit(paper); }
     submit(paper) { return this._stage.submit(paper); }
+
     enterBid(paper, reviewer, interest) {
         return this._stage.enterBid(paper, reviewer, interest);
     }
-    enterAssigment(paper, reviewer) {
-        return this._stage.enterAssigment(paper, reviewer);
+
+    enterAssignment(paper, reviewer) {
+        return this._stage.enterAssignment(paper, reviewer);
     }
-    asignarRevisores() { return this._stage.asignarRevisores(); }
+
+    assignReviewers() {
+        return this._stage.assignReviewers();
+    }
+
     enterReview(paper, reviewer, review, score) {
         return this._stage.enterReview(paper, reviewer, review, score);
     }
+
     obtenerArticulosOrdenadosPorScore() {
         return this._stage.obtenerArticulosOrdenadosPorScore();
     }
+
     obtenerArticulosAceptados() {
         return this._stage.obtenerArticulosAceptados();
     }
 
     /** @deprecated Usar setAcceptancePolicy() con una instancia de AcceptanceByPercentage en su lugar. */
     setAcceptancePercentage(percentage) {
-        if (percentage < 0 || percentage > 100)
+        if (percentage < 0 || percentage > 100) {
             throw new Error("El porcentaje de aceptación debe estar entre 0 y 100.");
+        }
         this._acceptancePercentage = percentage;
         this._acceptancePolicy.setPercentage(percentage);
     }
@@ -90,21 +99,20 @@ class Session {
         this._programCommittee.push(user);
     }
 
-    assigmentsPapers(paper) {
-        let nCantAssigment = 0;
-        for (let i = 0; i < this._assignments.length; i++) {
-            if (this._assignments[i].paper() == paper) nCantAssigment += 1;
-        }
-        return nCantAssigment;
+    assignmentsForPaper(paper) {
+        return this._assignments.filter(
+            (assignment) => assignment.paper() === paper
+        ).length;
     }
 
     bidExistsFor(paper, reviewer) {
-        return typeof(this.bidFor(paper, reviewer)) != "undefined";
+        return typeof(this.bidFor(paper, reviewer)) !== "undefined";
     }
 
     bidFor(paper, reviewer) {
         return this._bids.find(
-            (suspect) => suspect.paper() == paper && suspect.reviewer() == reviewer
+            (candidate) =>
+                candidate.paper() === paper && candidate.reviewer() === reviewer
         );
     }
 
@@ -113,60 +121,38 @@ class Session {
     }
 
     interestOrDefaultFor(paper, reviewer) {
-        if (this.bidExistsFor(paper, reviewer))
+        if (this.bidExistsFor(paper, reviewer)) {
             return this.interestFor(paper, reviewer);
+        }
         return Interests.NotInterested;
     }
 
-    assigmentExistsFor(paper, reviewer) {
-        return typeof(this.assigmentFor(paper, reviewer)) != "undefined";
+    assignmentExistsFor(paper, reviewer) {
+        return typeof(this.assignmentFor(paper, reviewer)) !== "undefined";
     }
 
-    assigmentFor(paper, reviewer) {
+    assignmentFor(paper, reviewer) {
         return this._assignments.find(
-            (suspect) => suspect.paper() == paper && suspect.reviewer() == reviewer
+            (candidate) =>
+                candidate.paper() === paper && candidate.reviewer() === reviewer
         );
     }
 
     calculateWorkload() {
-        const totalArticulos = this.papers().length;
-        const totalRevisores = this.programCommittee().length;
-        const totalRevisiones = 3 * totalArticulos;
-        const base = Math.floor(totalRevisiones / totalRevisores);
-        const resto = totalRevisiones % totalRevisores;
+        const totalPapers = this.papers().length;
+        const totalReviewers = this.programCommittee().length;
+        const totalReviews = 3 * totalPapers;
+        const baseWorkload = Math.floor(totalReviews / totalReviewers);
+        const remainingReviews = totalReviews % totalReviewers;
 
         this.programCommittee().forEach((reviewer, index) => {
-            const workload = base + (index < resto ? 1 : 0);
+            const workload = baseWorkload + (index < remainingReviews ? 1 : 0);
             reviewer.setWorkload(workload);
         });
     }
 
     cantidadArticulosAAceptar() {
         return this._acceptancePolicy.calcularCantidadAAceptar(this._papers.length);
-    }
-
-    interestPriority(interest) {
-        if (interest === Interests.Interested) return 2;
-        if (interest === Interests.Maybe) return 1;
-        return 0;
-    }
-
-    candidatesForAssignment() {
-        const candidates = [];
-
-        this.papers().forEach((paper) => {
-            this.programCommittee().forEach((reviewer) => {
-                candidates.push({
-                    paper,
-                    reviewer,
-                    interest: this.interestPriority(
-                        this.interestOrDefaultFor(paper, reviewer)
-                    )
-                });
-            });
-        });
-
-        return candidates;
     }
 }
 
