@@ -2,1135 +2,346 @@ const Session = require("../src/Session");
 const Reviewer = require("../src/Reviewer");
 const User = require("../src/User");
 const Paper = require("../src/Paper");
-const {Bid, Interests} = require("../src/Bid");
+const { Interests } = require("../src/Bid");
 const AcceptanceByPercentage = require("../src/policies/AcceptanceByPercentage");
 const AcceptanceByCount = require("../src/policies/AcceptanceByCount");
+const AcceptanceByScoreThreshold = require("../src/policies/AcceptanceByScoreThreshold");
 
-let newSession;
-let asse;
-let juan, julian, matias;
-let paper01, paper02, paper03;
+const reviewer = (name, id) =>
+    new Reviewer(name, `Universidad ${id}`, `reviewer${id}@mail.com`, "pass");
 
-beforeEach( ()=> {
-    newSession = new Session();
-    asse = new Session();
-    juan = new Reviewer("Juan Gardey", "LIFIA, UNLP", "jgardey@lifia.ar", "123");
-    julian = new Reviewer("Julián Grigera", "LIFIA, UNLP", "jgrigera@lifia.ar", "123");
-    matias = new Reviewer("Matias Urbieta", "LIFIA, UNLP", "murbieta@lifia.ar", "123");
-    paper01 = new Paper("A new approach on something", [juan, julian], juan);
-    paper02 = new Paper("Another approach on something else", [matias, julian], matias);
-    paper03 = new Paper("Yet another approach on something", [juan, matias], juan);
+const paper = (title = "Paper válido", author = reviewer("Autor", 99)) =>
+    new Paper(title, [author], author);
+
+const addReviewers = (session, reviewers) =>
+    reviewers.forEach((candidate) => session.addReviewer(candidate));
+
+const advance = (session, stages) => {
+    for (let index = 0; index < stages; index++) session.closeStage();
+};
+
+function assignedScenario() {
+    const session = new Session();
+    const article = paper();
+    const reviewers = [reviewer("R1", 1), reviewer("R2", 2), reviewer("R3", 3)];
+
+    addReviewers(session, reviewers);
+    session.submit(article);
+    advance(session, 1);
+    reviewers.forEach((candidate, index) =>
+        session.enterBid(
+            article,
+            candidate,
+            index < 2 ? Interests.Interested : Interests.Maybe
+        )
+    );
+    session.closeStage();
+    session.asignarRevisores();
+
+    return { session, article, reviewers };
+}
+
+function scoredPaper(title, scores) {
+    const article = paper(title, reviewer(`${title} Autor`, title.length + 20));
+    scores.forEach((score, index) =>
+        article.addReview(
+            reviewer(`${title} R${index}`, title.length + index + 40),
+            `Review ${index}`,
+            score
+        )
+    );
+    return article;
+}
+
+describe("Session como contexto del patrón State", () => {
+    test("inicia vacía y permite agregar revisores", () => {
+        const session = new Session();
+        const candidate = reviewer("Reviewer", 1);
+
+        expect(session.name()).toBe("");
+        expect(session.programCommittee()).toHaveLength(0);
+
+        session.addReviewer(candidate);
+        expect(session.programCommittee()).toEqual([candidate]);
+    });
+
+    test("recibe papers válidos y rechaza inválidos", () => {
+        const session = new Session();
+        const validPaper = paper();
+        const invalidPaper = paper("", reviewer("Autor", 1));
+
+        expect(session.canSubmit(validPaper)).toBe(true);
+        session.submit(validPaper);
+        expect(session.papers()).toContain(validPaper);
+
+        expect(session.canSubmit(invalidPaper)).toBe(false);
+        expect(() => session.submit(invalidPaper)).toThrow();
+    });
+
+    test("no expone el estado ni lo devuelve al cerrar una etapa", () => {
+        const session = new Session();
+
+        expect(session.stage).toBeUndefined();
+        expect(session.closeStage()).toBeUndefined();
+    });
+
+    test("rechaza operaciones que no pertenecen a recepción", () => {
+        const session = new Session();
+        const article = paper();
+        const candidate = reviewer("Reviewer", 1);
+
+        expect(() =>
+            session.enterBid(article, candidate, Interests.Interested)
+        ).toThrow();
+        expect(() => session.enterAssigment(article, candidate)).toThrow();
+        expect(() => session.enterReview(article, candidate, "Review", 2)).toThrow();
+    });
+
+    test("bidding registra y actualiza una única oferta", () => {
+        const session = new Session();
+        const article = paper();
+        const candidate = reviewer("Reviewer", 1);
+
+        session.submit(article);
+        advance(session, 1);
+        session.enterBid(article, candidate, Interests.Interested);
+        session.enterBid(article, candidate, Interests.Maybe);
+
+        expect(session.bids()).toHaveLength(1);
+        expect(session.interestFor(article, candidate)).toBe(Interests.Maybe);
+        expect(session.canSubmit(article)).toBe(false);
+        expect(() => session.submit(article)).toThrow();
+    });
+
+    test("assignment rechaza nuevas ofertas", () => {
+        const session = new Session();
+        const article = paper();
+        const candidate = reviewer("Reviewer", 1);
+
+        session.submit(article);
+        advance(session, 2);
+
+        expect(() =>
+            session.enterBid(article, candidate, Interests.Interested)
+        ).toThrow();
+    });
+
+    test("asigna los tres revisores con mayor prioridad", () => {
+        const session = new Session();
+        const article = paper("Paper A", reviewer("Autor", 10));
+        const reviewers = [
+            reviewer("R1", 1), reviewer("R2", 2),
+            reviewer("R3", 3), reviewer("R4", 4)
+        ];
+
+        addReviewers(session, reviewers);
+        session.submit(article);
+        advance(session, 1);
+        session.enterBid(article, reviewers[0], Interests.Interested);
+        session.enterBid(article, reviewers[1], Interests.Interested);
+        session.enterBid(article, reviewers[2], Interests.Maybe);
+        session.enterBid(article, reviewers[3], Interests.NotInterested);
+        session.closeStage();
+        session.asignarRevisores();
+
+        expect(session.assigmentsPapers(article)).toBe(3);
+        expect(session.assigmentExistsFor(article, reviewers[0])).toBe(true);
+        expect(session.assigmentExistsFor(article, reviewers[1])).toBe(true);
+        expect(session.assigmentExistsFor(article, reviewers[2])).toBe(true);
+        expect(session.assigmentExistsFor(article, reviewers[3])).toBe(false);
+    });
+
+    test("excluye autores y evita asignaciones duplicadas", () => {
+        const session = new Session();
+        const author1 = reviewer("Autor 1", 1);
+        const author2 = reviewer("Autor 2", 2);
+        const article = new Paper("Paper", [author1, author2], author1);
+        const reviewers = [
+            author1, author2, reviewer("R3", 3),
+            reviewer("R4", 4), reviewer("R5", 5)
+        ];
+
+        addReviewers(session, reviewers);
+        session.submit(article);
+        advance(session, 1);
+        reviewers.forEach((candidate) =>
+            session.enterBid(article, candidate, Interests.Interested)
+        );
+        session.closeStage();
+        session.asignarRevisores();
+
+        expect(session.assigmentExistsFor(article, author1)).toBe(false);
+        expect(session.assigmentExistsFor(article, author2)).toBe(false);
+        expect(session.assigmentsPapers(article)).toBe(3);
+        expect(() => session.enterAssigment(article, reviewers[2])).toThrow();
+    });
+
+    test("calcula y distribuye la carga de revisiones", () => {
+        const fourSession = new Session();
+        const fourReviewers = Array.from(
+            { length: 4 },
+            (_, index) => reviewer(`R${index}`, index)
+        );
+        addReviewers(fourSession, fourReviewers);
+        fourReviewers.forEach((author, index) =>
+            fourSession.submit(paper(`Paper ${index}`, author))
+        );
+        fourSession.calculateWorkload();
+        expect(fourReviewers.map((candidate) => candidate.getWorkload()))
+            .toEqual([3, 3, 3, 3]);
+
+        const tenSession = new Session();
+        const sevenReviewers = Array.from(
+            { length: 7 },
+            (_, index) => reviewer(`R${index}`, index + 10)
+        );
+        addReviewers(tenSession, sevenReviewers);
+        Array.from({ length: 10 }, (_, index) =>
+            tenSession.submit(
+                paper(`Paper ${index}`, sevenReviewers[index % sevenReviewers.length])
+            )
+        );
+        tenSession.calculateWorkload();
+        expect(sevenReviewers.map((candidate) => candidate.getWorkload()))
+            .toEqual([5, 5, 4, 4, 4, 4, 4]);
+    });
+
+    test("revision acepta solo reviews válidas de revisores asignados", () => {
+        const { session, article, reviewers } = assignedScenario();
+        const outsider = reviewer("Outsider", 20);
+
+        session.closeStage();
+        session.enterReview(article, reviewers[0], "Buen trabajo", 2);
+
+        expect(article.reviews()).toHaveLength(1);
+        expect(article.score()).toBe(2);
+        expect(() => session.enterReview(article, outsider, "Review", 2)).toThrow();
+        expect(() =>
+            session.enterReview(article, reviewers[0], "Duplicada", 1)
+        ).toThrow();
+        expect(() =>
+            session.enterReview(article, reviewers[1], "Fuera de rango", 4)
+        ).toThrow();
+        expect(() => session.asignarRevisores()).toThrow();
+    });
+
+    test("selection ordena y rechaza reviews tardías", () => {
+        const session = new Session();
+        const articleA = scoredPaper("A", [1, 2, 1]);
+        const articleB = scoredPaper("B", [3, 2, 3]);
+        const articleC = scoredPaper("C", [0, 1, 0]);
+
+        [articleA, articleB, articleC].forEach((item) => session.submit(item));
+        advance(session, 4);
+
+        expect(session.obtenerArticulosOrdenadosPorScore())
+            .toEqual([articleB, articleA, articleC]);
+        expect(() =>
+            session.enterReview(articleA, reviewer("Tardío", 30), "Review", 1)
+        ).toThrow();
+    });
+
+    test("no permite consultar selección en etapas anteriores", () => {
+        const session = new Session();
+
+        expect(() => session.obtenerArticulosAceptados()).toThrow();
+        expect(() => session.obtenerArticulosOrdenadosPorScore()).toThrow();
+    });
 });
 
-describe("A new Session", () =>{
-    it("should have an empty name", ()=> {
-        expect(newSession.name()).toBe("");
-    })
-
-    it("should have an empty Program Committee", ()=>{
-        expect(newSession.programCommittee()).toHaveLength(0);
-    })
-})
-
-describe("A Session", ()=>{
-    it("should be able to add PC members.", ()=>{
-        asse.addReviewer(juan);
-        expect(asse.programCommittee()).toContain(juan);
-        expect(asse.programCommittee()).toHaveLength(1);
-    })
-    it("should allow paper submissions", ()=>{
-        let actualStage
-        actualStage = asse.stage()
-        expect(actualStage.canSubmit(paper01)).toBe(true);
-        actualStage.submit(paper01);
-        expect(asse.papers()).toContain(paper01);
-    })
-    it("should not allow paper invalid submissions", ()=>{
-
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let paperA = new Paper("", [user1], user1);
-
-        expect(actualStage.canSubmit(paperA)).toBe(false);
-        let submission = ()=>{actualStage.submit(paperA)};
-        expect(submission).toThrow();
-
-    })
-})
-
-describe("During the bidding process, a Session", ()=>{
-    it("should receive bids", ()=>{
-        let actualStage = asse.stage()
-        actualStage = actualStage.closeStage()
-
-        actualStage.enterBid(paper02, juan, Interests.Interested);
-        expect(asse.bidExistsFor(paper02, juan)).toBe(true);
-        expect(asse.interestFor(paper02, juan)).toBe(Interests.Interested);
-    })
-    it("should allow overriding bids", ()=>{
-        let actualStage = asse.stage()
-        actualStage = actualStage.closeStage()
-        
-        actualStage.enterBid(paper02, juan, Interests.Interested);
-        const secondBid = () => {actualStage.enterBid(paper02, juan, Interests.Maybe)};
-        expect(secondBid).not.toThrow();
-        expect(asse.interestFor(paper02, juan)).toBe(Interests.Maybe);
-        expect(asse.bids()).toHaveLength(1);
-    })
-    it("should not allow to receive submissions", ()=>{
-        let actualStage = asse.stage()
-        actualStage = actualStage.closeStage()
-        expect(actualStage.canSubmit(paper01)).toBe(false);
-    })
-    it("should fail to receive submissions", ()=>{
-        let actualStage = asse.stage()
-        actualStage = actualStage.closeStage()      
-
-        let submission = ()=>{actualStage.submit(paper01)};
-        expect(submission).toThrow();
-    })
-})
-
-describe("During the assigment process, a Session", ()=>{
-    it("should not allow to receive bids", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let autor = new Reviewer("Autor", "Uni A", "autor@mail.com", "pass");
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let paperA = new Paper("Paper A", [autor], autor);
-        let paperB = new Paper("Paper B", [autor], autor);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, user1, Interests.Interested);
-        actualStage.enterBid(paperA, user2, Interests.Interested);
-        actualStage.enterBid(paperA, user3, Interests.Maybe);
-        actualStage = actualStage.closeStage();
-
-        let bidSubmission = ()=>{actualStage.enterBid(paperB, user1, Interests.Interested)};
-        expect(bidSubmission).toThrow();
-        
-    })
-})
-
-describe("During the revision process, a Session", ()=>{
-    it("assigning papers should not be allowed", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let autor = new Reviewer("Autor", "Uni A", "autor@mail.com", "pass");
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let paperA = new Paper("Paper A", [autor], autor);
-        let paperB = new Paper("Paper B", [autor], autor);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, user1, Interests.Interested);
-        actualStage.enterBid(paperA, user2, Interests.Interested);
-        actualStage.enterBid(paperA, user3, Interests.Maybe);
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        let assigment = ()=>{actualStage.asignarRevisores()};
-        expect(assigment).toThrow();
-        
-        let directAssigment = ()=>{actualStage.enterAssigment(paperA,user1)};
-        expect(directAssigment).toThrow();
-        
-    })
-})
-
-describe("During the selection process, a Session", ()=>{
-    it("should not allow to receive reviews", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let autor = new Reviewer("Autor", "Uni A", "autor@mail.com", "pass");
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let paperA = new Paper("Paper A", [autor], autor);
-        let paperB = new Paper("Paper B", [autor], autor);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, user1, Interests.Interested);
-        actualStage.enterBid(paperA, user2, Interests.Interested);
-        actualStage.enterBid(paperA, user3, Interests.Maybe);
-        actualStage = actualStage.closeStage();
-
-        actualStage.asignarRevisores();
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterReview(paperA,user2,"Rev user2",2);
-        expect(paperA.reviews()).toHaveLength(1);
-        actualStage = actualStage.closeStage();
-
-        let revision = ()=>{actualStage.enterReview(paperA,user1,"Rev user1",2);};
-        expect(revision).toThrow();
-        
-    })
-})
-
-describe("US1.1: Cálculo de la carga de revisiones por revisor", ()=>{
-    it("con 4 artículos y 4 revisores, cada revisor tiene exactamente 3 revisiones", ()=>{
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-        let actualStage = newSession.stage()
-
-        newSession.addReviewer(user1)
-        newSession.addReviewer(user2)
-        newSession.addReviewer(user3)
-        newSession.addReviewer(user4)
-
-        actualStage.submit(paperA)
-        actualStage.submit(paperB)
-        actualStage.submit(paperC)
-        actualStage.submit(paperD)
-
-        newSession.calculateWorkload();
-
-        expect(user1.getWorkload()).toBe(3);
-        expect(user2.getWorkload()).toBe(3);
-        expect(user3.getWorkload()).toBe(3);
-        expect(user4.getWorkload()).toBe(3);
-    })
-
-    it("con 10 artículos y 7 revisores, distribuye el resto: 2 revisores con 5 y 5 con 4", ()=>{
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let user5 = new Reviewer("User 5", "Uni 5", "u5@mail.com", "pass");
-        let user6 = new Reviewer("User 6", "Uni 6", "u6@mail.com", "pass");
-        let user7 = new Reviewer("User 7", "Uni 7", "u7@mail.com", "pass");
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-        let paperE = new Paper("Paper E", [user5], user5);
-        let paperF = new Paper("Paper F", [user6], user6);
-        let paperG = new Paper("Paper G", [user7], user7);
-        let paperH = new Paper("Paper H", [user1], user1);
-        let paperI = new Paper("Paper I", [user2], user2);
-        let paperJ = new Paper("Paper J", [user3], user3);
-        let actualStage = newSession.stage()
-        
-        newSession.addReviewer(user1)
-        newSession.addReviewer(user2)
-        newSession.addReviewer(user3)
-        newSession.addReviewer(user4)
-        newSession.addReviewer(user5)
-        newSession.addReviewer(user6)
-        newSession.addReviewer(user7)
-
-        actualStage.submit(paperA)
-        actualStage.submit(paperB)
-        actualStage.submit(paperC)
-        actualStage.submit(paperD)
-        actualStage.submit(paperE)
-        actualStage.submit(paperF)
-        actualStage.submit(paperG)
-        actualStage.submit(paperH)
-        actualStage.submit(paperI)
-        actualStage.submit(paperJ)
-
-        newSession.calculateWorkload();
-
-        expect(user1.getWorkload()).toBe(5);
-        expect(user2.getWorkload()).toBe(5);
-        expect(user3.getWorkload()).toBe(4);
-        expect(user4.getWorkload()).toBe(4);
-        expect(user5.getWorkload()).toBe(4);
-        expect(user6.getWorkload()).toBe(4);
-        expect(user7.getWorkload()).toBe(4);
-    })
-})
-
-describe("US1.2: Asignación de revisores basada en prioridades de Bidding", ()=>{
-    it("asigna los 3 revisores de mayor prioridad al Paper A", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let autor = new Reviewer("Autor", "Uni A", "autor@mail.com", "pass");
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let paperA = new Paper("Paper A", [autor], autor);
-        let paperB = new Paper("Paper B", [autor], autor);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, user1, Interests.Interested);
-        actualStage.enterBid(paperA, user2, Interests.Interested);
-        actualStage.enterBid(paperA, user3, Interests.Maybe);
-        actualStage = actualStage.closeStage();
-
-        actualStage.asignarRevisores();
-
-        expect(sesion.assignments().length).toBe(6)
-        expect(sesion.assigmentExistsFor(paperA,user1)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA,user3)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA,user4)).toBe(false);
-        expect(sesion.assigmentsPapers(paperA)).toBe(3)
-        expect(sesion.assigmentsPapers(paperB)).toBe(3)
-    })
-})
-
-describe("US1.3: Exclusión de revisores por Conflicto de Interés", ()=>{
-    it("excluye al autor del paper aunque tenga el bid de mayor prioridad", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let user5 = new Reviewer("User 5", "Uni 5", "u5@mail.com", "pass");
-        let paperA = new Paper("Paper A", [user1, user2], user1);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        sesion.addReviewer(user5);
-        actualStage.submit(paperA);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, user1, Interests.Interested);
-        actualStage.enterBid(paperA, user2, Interests.Maybe);
-        actualStage.enterBid(paperA, user3, Interests.Maybe);
-        actualStage.enterBid(paperA, user4, Interests.NotInterested);
-        actualStage.enterBid(paperA, user5, Interests.NotInterested);
-        actualStage = actualStage.closeStage();
-
-        actualStage.asignarRevisores();
-
-        expect(sesion.assigmentExistsFor(paperA,user1)).toBe(false);
-        expect(sesion.assigmentExistsFor(paperA,user2)).toBe(false);
-        expect(sesion.assigmentExistsFor(paperA,user3)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA,user4)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA,user5)).toBe(true);
-        expect(sesion.assigmentsPapers(paperA)).toBe(3)
-    })
-
-    it("no se permite asignar más de una vez a un mismo revisor a un paper.", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let paperA = new Paper("Paper A", [user1], user1);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        actualStage.submit(paperA);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, user1, Interests.Interested);
-        actualStage.enterBid(paperA, user2, Interests.Maybe);
-        actualStage.enterBid(paperA, user3, Interests.Maybe);
-        actualStage.enterBid(paperA, user4, Interests.NotInterested);
-        actualStage = actualStage.closeStage();
-
-        actualStage.asignarRevisores();
-        expect(sesion.assigmentExistsFor(paperA,user1)).toBe(false);
-        expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-        
-        let directAssigment = ()=>{actualStage.enterAssigment(paperA,user2)};
-        expect(directAssigment).toThrow();
-
-    })
-})
-
-describe("US2.1: Registro de revisión por un revisor asignado", ()=>{
-   it("solo permite cargar una review a un artículo asignado.", ()=>{
-       let sesion = new Session();
-       let actualStage = sesion.stage()
-       let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-       let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-       let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-       let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-       let paperA = new Paper("Paper A", [user1], user1);
-
-       sesion.addReviewer(user1);
-       sesion.addReviewer(user2);
-       sesion.addReviewer(user3);
-       sesion.addReviewer(user4);
-       actualStage.submit(paperA);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterBid(paperA, user1, Interests.Interested);
-       actualStage.enterBid(paperA, user2, Interests.Maybe);
-       actualStage.enterBid(paperA, user3, Interests.Maybe);
-       actualStage.enterBid(paperA, user4, Interests.NotInterested);
-       actualStage = actualStage.closeStage();
-
-       actualStage.asignarRevisores();
-       expect(sesion.assigmentExistsFor(paperA,user1)).toBe(false);
-       expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-
-       actualStage = actualStage.closeStage();
-       
-       actualStage.enterReview(paperA,user2,"Rev user2",2);
-       expect(paperA.reviews()).toHaveLength(1);
-
-       let invalidReview = ()=>{actualStage.enterReview(paperA,user1,"Rev user1",3)};
-       expect(invalidReview).toThrow();
-
-   })
-
-   it("solo permite cargar una review con un score entre -3 y +3.", ()=>{
-       let sesion = new Session();
-       let actualStage = sesion.stage()
-       let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-       let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-       let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-       let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-       let paperA = new Paper("Paper A", [user1], user1);
-
-       sesion.addReviewer(user1);
-       sesion.addReviewer(user2);
-       sesion.addReviewer(user3);
-       sesion.addReviewer(user4);
-       actualStage.submit(paperA);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterBid(paperA, user1, Interests.Interested);
-       actualStage.enterBid(paperA, user2, Interests.Maybe);
-       actualStage.enterBid(paperA, user3, Interests.Maybe);
-       actualStage.enterBid(paperA, user4, Interests.NotInterested);
-       actualStage = actualStage.closeStage();
-
-       actualStage.asignarRevisores();
-       expect(sesion.assigmentExistsFor(paperA,user1)).toBe(false);
-       expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-
-       actualStage = actualStage.closeStage();
-
-       let invalidReview = ()=>{actualStage.enterReview(paperA,user2,"Rev user2",4)};
-       expect(invalidReview).toThrow();
-
-   })
-})
-
-describe("US2.2: Límite de revisiones por artículo", ()=>{
-    it("Un artículo no puede admitir más de 3 revisiones en total.", ()=>{
-       let sesion = new Session();
-       let actualStage = sesion.stage()
-       let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-       let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-       let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-       let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-       let paperA = new Paper("Paper A", [user1], user1);
-
-       sesion.addReviewer(user1);
-       sesion.addReviewer(user2);
-       sesion.addReviewer(user3);
-       sesion.addReviewer(user4);
-       actualStage.submit(paperA);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterBid(paperA, user1, Interests.Interested);
-       actualStage.enterBid(paperA, user2, Interests.Maybe);
-       actualStage.enterBid(paperA, user3, Interests.Maybe);
-       actualStage.enterBid(paperA, user4, Interests.NotInterested);
-       actualStage = actualStage.closeStage();
-
-       actualStage.asignarRevisores();
-       expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-       expect(sesion.assigmentExistsFor(paperA,user3)).toBe(true);
-       expect(sesion.assigmentExistsFor(paperA,user4)).toBe(true);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterReview(paperA,user2,"Rev user2",2);
-       actualStage.enterReview(paperA,user3,"Rev user2",3);
-       actualStage.enterReview(paperA,user4,"Rev user2",3);
-       expect(paperA.reviews()).toHaveLength(3);
-
-       let invalidReview = ()=>{actualStage.enterReview(paperA,user2,"Rev other user2",0)};
-       expect(invalidReview).toThrow();
-
-   })
-})
-
-describe("US2.3: Cálculo automático del score del artículo", ()=>{
-    it("El score de un artículo debe calcularse como el promedio exacto de los puntajes de las revisiones que ha recibido hasta el momento.", ()=>{
-       let sesion = new Session();
-       let actualStage = sesion.stage()
-       let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-       let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-       let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-       let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-       let paperA = new Paper("Paper A", [user1], user1);
-
-       sesion.addReviewer(user1);
-       sesion.addReviewer(user2);
-       sesion.addReviewer(user3);
-       sesion.addReviewer(user4);
-       actualStage.submit(paperA);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterBid(paperA, user1, Interests.Interested);
-       actualStage.enterBid(paperA, user2, Interests.Maybe);
-       actualStage.enterBid(paperA, user3, Interests.Maybe);
-       actualStage.enterBid(paperA, user4, Interests.NotInterested);
-       actualStage = actualStage.closeStage();
-
-       actualStage.asignarRevisores();
-       expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-       expect(sesion.assigmentExistsFor(paperA,user3)).toBe(true);
-       expect(sesion.assigmentExistsFor(paperA,user4)).toBe(true);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterReview(paperA,user2,"Rev user2",2);
-       actualStage.enterReview(paperA,user3,"Rev user2",-1);
-       expect(paperA.reviews()).toHaveLength(2);
-
-       expect(paperA.score()).toBe(0.5)
-
-   })
-})
-
-describe("US3.1: Configuración del porcentaje de aceptación de la sesión", ()=>{
-    const AcceptanceByPercentage = require("../src/policies/AcceptanceByPercentage");
-
-    it("permite configurar un porcentaje válido y lo almacena correctamente", ()=>{
-        let politica = new AcceptanceByPercentage();
-        politica.setPercentage(25);
-        expect(politica.percentage()).toBe(25);
-    })
-
-    it("lanza un Error si el porcentaje es menor a 0", ()=>{
-        let politica = new AcceptanceByPercentage();
-        let invalidConfig = ()=>{ politica.setPercentage(-5) };
-        expect(invalidConfig).toThrow();
-    })
-
-    it("lanza un Error si el porcentaje es mayor a 100", ()=>{
-        let politica = new AcceptanceByPercentage();
-        let invalidConfig = ()=>{ politica.setPercentage(105) };
-        expect(invalidConfig).toThrow();
-    })
-})
-
-describe("US3.2: Ordenamiento de artículos por Score decreciente", ()=>{
-    it("retorna los artículos ordenados por score descendente, desempatando por orden de llegada", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-            
-        paperA.addReview(user2, "Rev A1", 1);
-        paperA.addReview(user3, "Rev A2", 2);
-
-        paperB.addReview(user1, "Rev B1", 2);
-        paperB.addReview(user3, "Rev B2", 3);
-
-        paperC.addReview(user1, "Rev C1", 1);
-        paperC.addReview(user2, "Rev C2", 2);
-
-        actualStage = actualStage.closeStage();
-
-        let ordenados = actualStage.obtenerArticulosOrdenadosPorScore();
-
-        expect(ordenados).toHaveLength(3);
-        expect(ordenados[0]).toBe(paperB);
-        expect(ordenados[1]).toBe(paperA);
-        expect(ordenados[2]).toBe(paperC);
-
-        actualStage = actualStage.closeStage();
-    })
-})
-
-describe("US3.3: Selección automática por Corte Fijo", ()=>{
-    const AcceptanceByPercentage = require("../src/policies/AcceptanceByPercentage");
-
-    it("retorna la cantidad de articulos a aceptar de acuerdo al porcentaje de aceptación.", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let user5 = new Reviewer("User 5", "Uni 5", "u5@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-        let paperE = new Paper("Paper D", [user5], user5);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-
-        let politica = new AcceptanceByPercentage();
-        politica.setPercentage(50);
-        sesion.setAcceptancePolicy(politica);
-
-        let cantidadArticulosAAceptar = sesion.cantidadArticulosAAceptar()
-        expect(cantidadArticulosAAceptar).toBe(1);
-    })
-
-    it("se marcaron los papers aceptados de acuerdo al orden por score final y al porcentaje de aceptación.", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-        actualStage.submit(paperD);
-
-        let politica = new AcceptanceByPercentage();
-        politica.setPercentage(50);
-        sesion.setAcceptancePolicy(politica);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        paperA.addReview(user2, "Rev A1", 1);
-        paperA.addReview(user3, "Rev A2", 2);
-
-        paperB.addReview(user1, "Rev B1", 3);
-        paperB.addReview(user3, "Rev B2", 3);
-
-        paperC.addReview(user1, "Rev C1", 1);
-        paperC.addReview(user2, "Rev C2", 2);
-
-        paperD.addReview(user1, "Rev C1", 2);
-        paperD.addReview(user3, "Rev C3", 3);
-        paperD.addReview(user3, "Rev C3", 3);
-        
-        let cantidadArticulosAAceptar = sesion.cantidadArticulosAAceptar()
-        expect(cantidadArticulosAAceptar).toBe(2);
-
-        actualStage = actualStage.closeStage();
-
-        let aceptados = actualStage.obtenerArticulosAceptados()
-        expect(aceptados).toHaveLength(2)
-        expect(paperA.isAccepted()).toBe(false);
-        expect(paperB.isAccepted()).toBe(true);
-        expect(paperC.isAccepted()).toBe(false);
-        expect(paperD.isAccepted()).toBe(true);
-
-        actualStage = actualStage.closeStage();
-    })
-
-    it("Para score final de un artículo se completan con puntaje -3 por review faltante.", ()=>{
-       let sesion = new Session();
-       let actualStage = sesion.stage()
-       let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-       let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-       let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-       let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-       let paperA = new Paper("Paper A", [user1], user1);
-
-       sesion.addReviewer(user1);
-       sesion.addReviewer(user2);
-       sesion.addReviewer(user3);
-       sesion.addReviewer(user4);
-       actualStage.submit(paperA);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterBid(paperA, user1, Interests.Interested);
-       actualStage.enterBid(paperA, user2, Interests.Maybe);
-       actualStage.enterBid(paperA, user3, Interests.Maybe);
-       actualStage.enterBid(paperA, user4, Interests.NotInterested);
-       actualStage = actualStage.closeStage();
-
-       actualStage.asignarRevisores();
-       expect(sesion.assigmentExistsFor(paperA,user2)).toBe(true);
-       expect(sesion.assigmentExistsFor(paperA,user3)).toBe(true);
-       expect(sesion.assigmentExistsFor(paperA,user4)).toBe(true);
-       actualStage = actualStage.closeStage();
-
-       actualStage.enterReview(paperA,user2,"Rev user2",2);
-       actualStage.enterReview(paperA,user3,"Rev user2",-1);
-       expect(paperA.reviews()).toHaveLength(2);
-
-       expect(paperA.finalScore()).toBeCloseTo(-0.6666)
-
-   })
-})
-
-describe("US4.1: Selección de articulos en otras etapas", ()=>{
-    const AcceptanceByPercentage = require("../src/policies/AcceptanceByPercentage");
-
-it("no se permite obtener el listado de articulos aceptados en otra etapa que no sea de Selección.", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-        actualStage.submit(paperD);
-
-        let politica = new AcceptanceByPercentage();
-        politica.setPercentage(50);
-        sesion.setAcceptancePolicy(politica);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        paperA.addReview(user2, "Rev A1", 1);
-        paperA.addReview(user3, "Rev A2", 2);
-
-        paperB.addReview(user1, "Rev B1", 3);
-        paperB.addReview(user3, "Rev B2", 3);
-
-        paperC.addReview(user1, "Rev C1", 1);
-        paperC.addReview(user2, "Rev C2", 2);
-
-        paperD.addReview(user1, "Rev C1", 2);
-        paperD.addReview(user3, "Rev C3", 3);
-        paperD.addReview(user3, "Rev C3", 3);
-        
-        let invalidTran = ()=>{ actualStage.obtenerArticulosAceptados() };
-        expect(invalidTran).toThrow();
-
-    })
-
-    it("retorna los artículos ordenados por score descendente, desempatando por orden de llegada", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage()
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-            
-        paperA.addReview(user2, "Rev A1", 1);
-        paperA.addReview(user3, "Rev A2", 2);
-
-        paperB.addReview(user1, "Rev B1", 2);
-        paperB.addReview(user3, "Rev B2", 3);
-
-        paperC.addReview(user1, "Rev C1", 1);
-        paperC.addReview(user2, "Rev C2", 2);
-
-        let invalidTran = ()=>{ actualStage.obtenerArticulosOrdenadosPorScore() };
-        expect(invalidTran).toThrow();
-
-    })
-
-})
-
-describe("US2.1: Patrón Strategy - Extracción de Política por Porcentaje", ()=>{
-    const AcceptanceByPercentage = require("../src/policies/AcceptanceByPercentage");
-
-    it("con 50% de aceptación y 2 papers (scores 2.0 y 0.0), solo acepta el de mayor score", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-
-        let politica = new AcceptanceByPercentage();
-        politica.setPercentage(50);
-        sesion.setAcceptancePolicy(politica);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        paperA.addReview(user2, "Rev A1", 2);
-        paperA.addReview(user3, "Rev A2", 2);
-        paperA.addReview(user4, "Rev A3", 2);
-
-        paperB.addReview(user1, "Rev B1", 0);
-        paperB.addReview(user3, "Rev B2", 0);
-        paperB.addReview(user4, "Rev B3", 0);
-
-        actualStage = actualStage.closeStage();
-
-        let aceptados = actualStage.obtenerArticulosAceptados();
-        expect(aceptados).toHaveLength(1);
-        expect(paperA.isAccepted()).toBe(true);
-        expect(paperB.isAccepted()).toBe(false);
-
-        actualStage = actualStage.closeStage();
-    })
-})
-
-describe("US2.2: Política de Aceptación por Cantidad Fija (AcceptanceByCount)", ()=>{
-    const AcceptanceByCount = require("../src/policies/AcceptanceByCount");
-
-    it("con máximo 2 artículos y 4 papers (scores 3.0, 1.0, 2.5, 0.0), acepta solo los 2 de mayor score", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let user5 = new Reviewer("User 5", "Uni 5", "u5@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        sesion.addReviewer(user5);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-        actualStage.submit(paperD);
-
-        let politica = new AcceptanceByCount(2);
-        sesion.setAcceptancePolicy(politica);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        paperA.addReview(user2, "Rev A1", 3);
-        paperA.addReview(user3, "Rev A2", 3);
-        paperA.addReview(user4, "Rev A3", 3);
-
-        paperB.addReview(user2, "Rev B1", 1);
-        paperB.addReview(user3, "Rev B2", 1);
-        paperB.addReview(user4, "Rev B3", 1);
-
-        paperC.addReview(user2, "Rev C1", 3);
-        paperC.addReview(user3, "Rev C2", 2);
-        paperC.addReview(user4, "Rev C3", 3);
-
-        paperD.addReview(user2, "Rev D1", 0);
-        paperD.addReview(user3, "Rev D2", 0);
-        paperD.addReview(user4, "Rev D3", 0);
-
-        actualStage = actualStage.closeStage();
-
-        let aceptados = actualStage.obtenerArticulosAceptados();
-        expect(aceptados).toHaveLength(2);
-        expect(paperA.isAccepted()).toBe(true);
-        expect(paperC.isAccepted()).toBe(true);
-        expect(paperB.isAccepted()).toBe(false);
-        expect(paperD.isAccepted()).toBe(false);
-
-        actualStage = actualStage.closeStage();
-    })
-})
-
-describe("US2.3: Política de Aceptación por Umbral de Score (AcceptanceByScoreThreshold)", ()=>{
-    const AcceptanceByScoreThreshold = require("../src/policies/AcceptanceByScoreThreshold");
-
-    it("con umbral 1.5 y 4 papers (scores 2.0, 1.67, 1.0, 0.0), acepta solo los >= 1.5", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-        let user5 = new Reviewer("User 5", "Uni 5", "u5@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-        let paperD = new Paper("Paper D", [user4], user4);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-        sesion.addReviewer(user5);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-        actualStage.submit(paperD);
-
-        let politica = new AcceptanceByScoreThreshold(1.5);
-        sesion.setAcceptancePolicy(politica);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        paperA.addReview(user2, "Rev A1", 2);
-        paperA.addReview(user3, "Rev A2", 2);
-        paperA.addReview(user4, "Rev A3", 2);
-
-        paperB.addReview(user2, "Rev B1", 2);
-        paperB.addReview(user3, "Rev B2", 2);
-        paperB.addReview(user4, "Rev B3", 1);
-
-        paperC.addReview(user2, "Rev C1", 1);
-        paperC.addReview(user3, "Rev C2", 1);
-        paperC.addReview(user4, "Rev C3", 1);
-
-        paperD.addReview(user2, "Rev D1", 0);
-        paperD.addReview(user3, "Rev D2", 0);
-        paperD.addReview(user4, "Rev D3", 0);
-
-        actualStage = actualStage.closeStage();
-
-        let aceptados = actualStage.obtenerArticulosAceptados();
-        expect(aceptados).toHaveLength(2);
-        expect(paperA.isAccepted()).toBe(true);
-        expect(paperB.isAccepted()).toBe(true);
-        expect(paperC.isAccepted()).toBe(false);
-        expect(paperD.isAccepted()).toBe(false);
-
-        actualStage = actualStage.closeStage();
-    })
-})
-
-describe("US2.4: Intercambio Dinámico de Políticas (Patrón Strategy)", ()=>{
-    const AcceptanceByScoreThreshold = require("../src/policies/AcceptanceByScoreThreshold");
-    const AcceptanceByCount = require("../src/policies/AcceptanceByCount");
-
-    it("cambia la política de umbral a cupo fijo y re-evalúa la selección", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-
-        let user1 = new Reviewer("User 1", "Uni 1", "u1@mail.com", "pass");
-        let user2 = new Reviewer("User 2", "Uni 2", "u2@mail.com", "pass");
-        let user3 = new Reviewer("User 3", "Uni 3", "u3@mail.com", "pass");
-        let user4 = new Reviewer("User 4", "Uni 4", "u4@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [user1], user1);
-        let paperB = new Paper("Paper B", [user2], user2);
-        let paperC = new Paper("Paper C", [user3], user3);
-
-        sesion.addReviewer(user1);
-        sesion.addReviewer(user2);
-        sesion.addReviewer(user3);
-        sesion.addReviewer(user4);
-
-        actualStage.submit(paperA);
-        actualStage.submit(paperB);
-        actualStage.submit(paperC);
-
-        let politicaUmbral = new AcceptanceByScoreThreshold(1.5);
-        sesion.setAcceptancePolicy(politicaUmbral);
-
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-        actualStage = actualStage.closeStage();
-
-        paperA.addReview(user2, "Rev A1", 2);
-        paperA.addReview(user3, "Rev A2", 2);
-        paperA.addReview(user4, "Rev A3", 2);
-
-        paperB.addReview(user2, "Rev B1", 2);
-        paperB.addReview(user3, "Rev B2", 2);
-        paperB.addReview(user4, "Rev B3", 1);
-
-        paperC.addReview(user2, "Rev C1", 0);
-        paperC.addReview(user3, "Rev C2", 0);
-        paperC.addReview(user4, "Rev C3", 0);
-
-        actualStage = actualStage.closeStage();
-
-        let aceptados = actualStage.obtenerArticulosAceptados();
-        expect(aceptados).toHaveLength(2);
-        expect(paperA.isAccepted()).toBe(true);
-        expect(paperB.isAccepted()).toBe(true);
-        expect(paperC.isAccepted()).toBe(false);
-
-        let politicaCupo = new AcceptanceByCount(1);
-        sesion.setAcceptancePolicy(politicaCupo);
-
-        paperA.declinePaper();
-        paperB.declinePaper();
-        paperC.declinePaper();
-
-        aceptados = actualStage.obtenerArticulosAceptados();
-        expect(aceptados).toHaveLength(1);
-        expect(paperA.isAccepted()).toBe(true);
-        expect(paperB.isAccepted()).toBe(false);
-        expect(paperC.isAccepted()).toBe(false);
-
-        actualStage = actualStage.closeStage();
-    })
-})
-
-
-describe("Flujo completo con usuarios que no son revisores", ()=>{
-    it("permite completar la sesión sin que los usuarios no revisores participen en la asignación", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-
-        let autor = new User("Autor", "Uni A", "autor@mail.com", "pass");
-        let noRevisor = new User("No revisor", "Uni B", "noreviewer@mail.com", "pass");
-        let reviewer1 = new Reviewer("Reviewer 1", "Uni 1", "r1@mail.com", "pass");
-        let reviewer2 = new Reviewer("Reviewer 2", "Uni 2", "r2@mail.com", "pass");
-        let reviewer3 = new Reviewer("Reviewer 3", "Uni 3", "r3@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [autor, noRevisor], autor);
-
-        sesion.addReviewer(reviewer1);
-        sesion.addReviewer(reviewer2);
-        sesion.addReviewer(reviewer3);
-
-        actualStage.submit(paperA);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, reviewer1, Interests.Interested);
-        actualStage.enterBid(paperA, reviewer2, Interests.Interested);
-        actualStage.enterBid(paperA, reviewer3, Interests.Maybe);
-        actualStage = actualStage.closeStage();
-
-        actualStage.asignarRevisores();
-
-        expect(sesion.assigmentExistsFor(paperA, reviewer1)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA, reviewer2)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA, reviewer3)).toBe(true);
-        expect(sesion.assigmentExistsFor(paperA, noRevisor)).toBe(false);
-        expect(sesion.assigmentsPapers(paperA)).toBe(3);
-
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterReview(paperA, reviewer1, "Rev 1", 2);
-        actualStage.enterReview(paperA, reviewer2, "Rev 2", 1);
-        actualStage.enterReview(paperA, reviewer3, "Rev 3", -1);
-
-        expect(paperA.reviews()).toHaveLength(3);
-        expect(paperA.score()).toBeCloseTo(2 / 3, 5);
-
-        let acceptancePolicy = new AcceptanceByCount(2);
-        sesion.setAcceptancePolicy(acceptancePolicy);
-
-        actualStage = actualStage.closeStage();
-
-        let aceptados = actualStage.obtenerArticulosAceptados();
-        expect(aceptados).toHaveLength(1);
-        expect(paperA.isAccepted()).toBe(true);
-    })
-
-    it("no debe asignar revisiones a un usuario que no forma parte del comité", ()=>{
-        let sesion = new Session();
-        let actualStage = sesion.stage();
-
-        let autor = new User("Autor", "Uni A", "autor@mail.com", "pass");
-        let noRevisor = new User("No revisor", "Uni B", "noreviewer@mail.com", "pass");
-        let reviewer1 = new Reviewer("Reviewer 1", "Uni 1", "r1@mail.com", "pass");
-        let reviewer2 = new Reviewer("Reviewer 2", "Uni 2", "r2@mail.com", "pass");
-        let reviewer3 = new Reviewer("Reviewer 3", "Uni 3", "r3@mail.com", "pass");
-
-        let paperA = new Paper("Paper A", [autor, noRevisor], autor);
-
-        sesion.addReviewer(reviewer1);
-        sesion.addReviewer(reviewer2);
-        sesion.addReviewer(reviewer3);
-
-        actualStage.submit(paperA);
-        actualStage = actualStage.closeStage();
-
-        actualStage.enterBid(paperA, reviewer1, Interests.Interested);
-        actualStage.enterBid(paperA, reviewer2, Interests.Interested);
-        actualStage.enterBid(paperA, reviewer3, Interests.Maybe);
-        actualStage = actualStage.closeStage();
-
-        actualStage.asignarRevisores();
-
-        expect(sesion.assigmentExistsFor(paperA, noRevisor)).toBe(false);
-        expect(sesion.assigmentsPapers(paperA)).toBe(3);
-    })
-})
+describe("Políticas de aceptación", () => {
+    test("valida el porcentaje", () => {
+        const policy = new AcceptanceByPercentage();
+
+        policy.setPercentage(25);
+        expect(policy.percentage()).toBe(25);
+        expect(() => policy.setPercentage(-1)).toThrow();
+        expect(() => policy.setPercentage(101)).toThrow();
+    });
+
+    test("selecciona por porcentaje y score mínimo", () => {
+        const session = new Session();
+        const papers = [
+            scoredPaper("A", [3, 3, 3]),
+            scoredPaper("B", [2, 2, 2]),
+            scoredPaper("C", [0, 0, 0]),
+            scoredPaper("D", [-1, -1, -1])
+        ];
+        const policy = new AcceptanceByPercentage();
+
+        papers.forEach((item) => session.submit(item));
+        policy.setPercentage(50);
+        session.setAcceptancePolicy(policy);
+        advance(session, 4);
+
+        expect(session.cantidadArticulosAAceptar()).toBe(2);
+        expect(session.obtenerArticulosAceptados()).toEqual(papers.slice(0, 2));
+    });
+
+    test("selecciona por cantidad fija", () => {
+        const session = new Session();
+        const articleA = scoredPaper("A", [3, 3, 3]);
+        const articleB = scoredPaper("B", [1, 1, 1]);
+        const articleC = scoredPaper("C", [3, 2, 3]);
+        const articleD = scoredPaper("D", [0, 0, 0]);
+
+        [articleA, articleB, articleC, articleD]
+            .forEach((item) => session.submit(item));
+        session.setAcceptancePolicy(new AcceptanceByCount(2));
+        advance(session, 4);
+
+        expect(session.obtenerArticulosAceptados()).toEqual([articleA, articleC]);
+    });
+
+    test("selecciona por umbral y permite cambiar de estrategia", () => {
+        const session = new Session();
+        const articleA = scoredPaper("A", [2, 2, 2]);
+        const articleB = scoredPaper("B", [2, 2, 1]);
+        const articleC = scoredPaper("C", [0, 0, 0]);
+
+        [articleA, articleB, articleC].forEach((item) => session.submit(item));
+        session.setAcceptancePolicy(new AcceptanceByScoreThreshold(1.5));
+        advance(session, 4);
+
+        expect(session.obtenerArticulosAceptados()).toEqual([articleA, articleB]);
+
+        session.setAcceptancePolicy(new AcceptanceByCount(1));
+        expect(session.obtenerArticulosAceptados()).toEqual([articleA]);
+    });
+});
+
+describe("Usuarios que no son revisores", () => {
+    test("no participan de asignaciones ni revisiones", () => {
+        const session = new Session();
+        const author = new User("Autor", "Universidad", "author@mail.com", "pass");
+        const nonReviewer = new User(
+            "No reviewer", "Universidad", "user@mail.com", "pass"
+        );
+        const article = new Paper("Paper", [author, nonReviewer], author);
+        const reviewers = [
+            reviewer("R1", 1), reviewer("R2", 2), reviewer("R3", 3)
+        ];
+
+        addReviewers(session, reviewers);
+        session.submit(article);
+        advance(session, 1);
+        reviewers.forEach((candidate) =>
+            session.enterBid(article, candidate, Interests.Interested)
+        );
+        session.closeStage();
+        session.asignarRevisores();
+
+        expect(session.assigmentExistsFor(article, nonReviewer)).toBe(false);
+        expect(session.assigmentsPapers(article)).toBe(3);
+
+        session.closeStage();
+        expect(() =>
+            session.enterReview(article, nonReviewer, "Review", 1)
+        ).toThrow();
+
+        reviewers.forEach((candidate, index) =>
+            session.enterReview(article, candidate, `Review ${index}`, index - 1)
+        );
+        expect(article.reviews()).toHaveLength(3);
+    });
+});
