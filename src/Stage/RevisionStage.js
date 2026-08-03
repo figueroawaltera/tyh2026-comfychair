@@ -2,8 +2,12 @@ const SessionStage = require("./SessionStage");
 const SelectionStage = require("./SelectionStage");
 
 class RevisionStage extends SessionStage {
+    canTransitionTo(nextStage) {
+        return nextStage instanceof SelectionStage;
+    }
+
     closeStage() {
-        this._Session._changeStage(new SelectionStage(this._Session));
+        this._Session.transitionTo(new SelectionStage(this._Session), this);
     }
 
     enterReview(paper, reviewer, review, score) {
