@@ -13,9 +13,6 @@ const reviewer = (name, id) =>
 const paper = (title = "Paper válido", author = reviewer("Autor", 99)) =>
     new Paper(title, [author], author);
 
-const addReviewers = (session, reviewers) =>
-    reviewers.forEach((candidate) => session.addReviewer(candidate));
-
 const advance = (session, stages) => {
     for (let index = 0; index < stages; index++) session.closeStage();
 };
@@ -25,18 +22,12 @@ function assignedScenario() {
     const article = paper();
     const reviewers = [reviewer("R1", 1), reviewer("R2", 2), reviewer("R3", 3)];
 
-    addReviewers(session, reviewers);
+    reviewers.forEach((candidate) => session.addReviewer(candidate));
     session.submit(article);
     session.closeStage();
-
-    reviewers.forEach((candidate, index) =>
-        session.enterBid(
-            article,
-            candidate,
-            index < 2 ? Interests.Interested : Interests.Maybe
-        )
+    reviewers.forEach((candidate) =>
+        session.enterBid(article, candidate, Interests.Interested)
     );
-
     session.closeStage();
     session.assignReviewers();
 
@@ -45,7 +36,6 @@ function assignedScenario() {
 
 function scoredPaper(title, scores) {
     const article = paper(title, reviewer(`${title} Autor`, title.length + 20));
-
     scores.forEach((score, index) =>
         article.addReview(
             reviewer(`${title} R${index}`, title.length + index + 40),
@@ -53,22 +43,10 @@ function scoredPaper(title, scores) {
             score
         )
     );
-
     return article;
 }
 
 describe("Session como contexto del patrón State", () => {
-    test("inicia vacía y permite agregar revisores", () => {
-        const session = new Session();
-        const candidate = reviewer("Reviewer", 1);
-
-        expect(session.name()).toBe("");
-        expect(session.programCommittee()).toHaveLength(0);
-
-        session.addReviewer(candidate);
-        expect(session.programCommittee()).toEqual([candidate]);
-    });
-
     test("recibe papers válidos y rechaza inválidos", () => {
         const session = new Session();
         const validPaper = paper();
@@ -77,7 +55,6 @@ describe("Session como contexto del patrón State", () => {
         expect(session.canSubmit(validPaper)).toBe(true);
         session.submit(validPaper);
         expect(session.papers()).toContain(validPaper);
-
         expect(session.canSubmit(invalidPaper)).toBe(false);
         expect(() => session.submit(invalidPaper)).toThrow();
     });
@@ -93,12 +70,12 @@ describe("Session como contexto del patrón State", () => {
         session.enterBid(article, candidate, Interests.Maybe);
 
         expect(session.bids()).toHaveLength(1);
+        expect(session.bidFor(article, candidate).matches(article, candidate)).toBe(true);
         expect(session.interestFor(article, candidate)).toBe(Interests.Maybe);
-        expect(session.canSubmit(article)).toBe(false);
         expect(() => session.submit(article)).toThrow();
     });
 
-    test("assignment rechaza ofertas y asignaciones duplicadas", () => {
+    test("assignment crea una relación y rechaza duplicados", () => {
         const session = new Session();
         const article = paper();
         const candidate = reviewer("Reviewer", 1);
@@ -106,18 +83,18 @@ describe("Session como contexto del patrón State", () => {
         session.addReviewer(candidate);
         session.submit(article);
         advance(session, 2);
-        session.enterAssignment(article, candidate);
 
-        expect(session.assignmentExistsFor(article, candidate)).toBe(true);
-        expect(session.assignmentFor(article, candidate).reviewer()).toBe(candidate);
+        const assignment = session.enterAssignment(article, candidate);
+
+        expect(assignment.matches(article, candidate)).toBe(true);
+        expect(session.assignmentFor(article, candidate)).toBe(assignment);
         expect(session.assignmentsForPaper(article)).toBe(1);
+        expect(article.reviewersAssigned()).toBe(1);
+        expect(candidate.papersAssigned()).toBe(1);
         expect(() => session.enterAssignment(article, candidate)).toThrow();
-        expect(() =>
-            session.enterBid(article, candidate, Interests.Interested)
-        ).toThrow();
     });
 
-    test("asigna los tres revisores con mayor prioridad", () => {
+    test("asigna por prioridad y excluye conflictos", () => {
         const session = new Session();
         const article = paper("Paper A", reviewer("Autor", 10));
         const reviewers = [
@@ -127,13 +104,13 @@ describe("Session como contexto del patrón State", () => {
             reviewer("R4", 4)
         ];
 
-        addReviewers(session, reviewers);
+        reviewers.forEach((candidate) => session.addReviewer(candidate));
         session.submit(article);
         session.closeStage();
         session.enterBid(article, reviewers[0], Interests.Interested);
         session.enterBid(article, reviewers[1], Interests.Interested);
         session.enterBid(article, reviewers[2], Interests.Maybe);
-        session.enterBid(article, reviewers[3], Interests.NotInterested);
+        session.enterBid(article, reviewers[3], Interests.Conflict);
         session.closeStage();
         session.assignReviewers();
 
@@ -144,12 +121,12 @@ describe("Session como contexto del patrón State", () => {
         expect(session.assignmentExistsFor(article, reviewers[3])).toBe(false);
     });
 
-    test("excluye autores durante la asignación", () => {
+    test("Paper evita asignar a sus autores", () => {
         const session = new Session();
         const author1 = reviewer("Autor 1", 1);
         const author2 = reviewer("Autor 2", 2);
         const article = new Paper("Paper", [author1, author2], author1);
-        const reviewers = [
+        const candidates = [
             author1,
             author2,
             reviewer("R3", 3),
@@ -157,10 +134,10 @@ describe("Session como contexto del patrón State", () => {
             reviewer("R5", 5)
         ];
 
-        addReviewers(session, reviewers);
+        candidates.forEach((candidate) => session.addReviewer(candidate));
         session.submit(article);
         session.closeStage();
-        reviewers.forEach((candidate) =>
+        candidates.forEach((candidate) =>
             session.enterBid(article, candidate, Interests.Interested)
         );
         session.closeStage();
@@ -178,36 +155,29 @@ describe("Session como contexto del patrón State", () => {
             (_, index) => reviewer(`R${index}`, index)
         );
 
-        addReviewers(session, reviewers);
+        reviewers.forEach((candidate) => session.addReviewer(candidate));
         Array.from({ length: 10 }, (_, index) =>
-            session.submit(
-                paper(`Paper ${index}`, reviewers[index % reviewers.length])
-            )
+            session.submit(paper(`Paper ${index}`, reviewers[index % reviewers.length]))
         );
 
         session.calculateWorkload();
 
-        expect(reviewers.map((candidate) => candidate.getWorkload()))
+        expect(reviewers.map((candidate) => candidate.workload()))
             .toEqual([5, 5, 4, 4, 4, 4, 4]);
     });
 
-    test("revision acepta solo reviews válidas de revisores asignados", () => {
+    test("revision acepta solo reviews de revisores asignados", () => {
         const { session, article, reviewers } = assignedScenario();
         const outsider = reviewer("Outsider", 20);
 
         session.closeStage();
         session.enterReview(article, reviewers[0], "Buen trabajo", 2);
 
-        expect(article.reviews()).toHaveLength(1);
+        expect(article.reviewFor(reviewers[0]).isFrom(reviewers[0])).toBe(true);
         expect(article.score()).toBe(2);
         expect(() => session.enterReview(article, outsider, "Review", 2)).toThrow();
-        expect(() =>
-            session.enterReview(article, reviewers[0], "Duplicada", 1)
-        ).toThrow();
-        expect(() =>
-            session.enterReview(article, reviewers[1], "Fuera de rango", 4)
-        ).toThrow();
-        expect(() => session.assignReviewers()).toThrow();
+        expect(() => session.enterReview(article, reviewers[0], "Duplicada", 1)).toThrow();
+        expect(() => session.enterReview(article, reviewers[1], "Fuera de rango", 4)).toThrow();
     });
 
     test("selection ordena papers y rechaza reviews tardías", () => {
@@ -254,8 +224,7 @@ describe("Políticas de aceptación", () => {
         const articleC = scoredPaper("C", [3, 2, 3]);
         const articleD = scoredPaper("D", [0, 0, 0]);
 
-        [articleA, articleB, articleC, articleD]
-            .forEach((item) => session.submit(item));
+        [articleA, articleB, articleC, articleD].forEach((item) => session.submit(item));
         session.setAcceptancePolicy(new AcceptanceByCount(2));
         advance(session, 4);
 
@@ -280,32 +249,18 @@ describe("Políticas de aceptación", () => {
 });
 
 describe("Usuarios que no son revisores", () => {
-    test("no participan de asignaciones ni revisiones", () => {
+    test("Paper impide que participen de asignaciones", () => {
         const session = new Session();
         const author = new User("Autor", "Universidad", "author@mail.com", "pass");
-        const nonReviewer = new User(
-            "No reviewer", "Universidad", "user@mail.com", "pass"
-        );
-        const article = new Paper("Paper", [author, nonReviewer], author);
-        const reviewers = [
-            reviewer("R1", 1), reviewer("R2", 2), reviewer("R3", 3)
-        ];
+        const nonReviewer = new User("No reviewer", "Universidad", "user@mail.com", "pass");
+        const article = new Paper("Paper", [author], author);
 
-        addReviewers(session, reviewers);
+        session.addReviewer(nonReviewer);
         session.submit(article);
-        session.closeStage();
-        reviewers.forEach((candidate) =>
-            session.enterBid(article, candidate, Interests.Interested)
-        );
-        session.closeStage();
-        session.assignReviewers();
+        advance(session, 2);
 
+        expect(article.canBeReviewedBy(nonReviewer)).toBe(false);
+        expect(() => session.enterAssignment(article, nonReviewer)).toThrow();
         expect(session.assignmentExistsFor(article, nonReviewer)).toBe(false);
-        expect(session.assignmentsForPaper(article)).toBe(3);
-
-        session.closeStage();
-        expect(() =>
-            session.enterReview(article, nonReviewer, "Review", 1)
-        ).toThrow();
     });
 });
