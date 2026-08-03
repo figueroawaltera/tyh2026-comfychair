@@ -2,6 +2,10 @@ const SessionStage = require("./SessionStage");
 const BiddingStage = require("./BiddingStage");
 
 class ReceivingStage extends SessionStage {
+    canTransitionTo(nextStage) {
+        return nextStage instanceof BiddingStage;
+    }
+
     canSubmit(paper) {
         return paper.isValid();
     }
@@ -12,7 +16,7 @@ class ReceivingStage extends SessionStage {
     }
 
     closeStage() {
-        this._Session._changeStage(new BiddingStage(this._Session));
+        this._Session.transitionTo(new BiddingStage(this._Session), this);
     }
 }
 
