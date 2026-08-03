@@ -1,7 +1,7 @@
 const SessionStage = require("./SessionStage");
 const RevisionStage = require("./RevisionStage");
 const Assignment = require("../Assignment");
-const { Interests } = require("../Bid");
+const { Bid, Interests } = require("../Bid");
 
 class AssignmentStage extends SessionStage {
     canTransitionTo(nextStage) {
@@ -19,32 +19,22 @@ class AssignmentStage extends SessionStage {
             );
         }
 
-        paper.addReviewerAssigned();
-        reviewer.setPapersAssigned();
-        this._session.assignments().push(new Assignment(paper, reviewer));
+        const assignment = Assignment.create(paper, reviewer);
+        this._session.addAssignment(assignment);
+        return assignment;
     }
 
     assignReviewers() {
         this._session.calculateWorkload();
 
         const candidates = this.candidatesForAssignment()
-            .sort((a, b) => b.interestPriority - a.interestPriority);
+            .sort((a, b) => b.priority - a.priority);
 
-        for (const { paper, reviewer } of candidates) {
-            if (
-                paper.getReviewersAssigned() < 3 &&
-                reviewer.acceptPapers() &&
-                !reviewer.isAuthor(paper.authors())
-            ) {
+        for (const { paper, reviewer, hasConflict } of candidates) {
+            if (!hasConflict && paper.canBeReviewedBy(reviewer)) {
                 this.enterAssignment(paper, reviewer);
             }
         }
-    }
-
-    interestPriority(interest) {
-        if (interest === Interests.Interested) return 2;
-        if (interest === Interests.Maybe) return 1;
-        return 0;
     }
 
     candidatesForAssignment() {
@@ -52,12 +42,15 @@ class AssignmentStage extends SessionStage {
 
         this._session.papers().forEach((paper) => {
             this._session.programCommittee().forEach((reviewer) => {
+                const bid = this._session.bidFor(paper, reviewer);
+
                 candidates.push({
                     paper,
                     reviewer,
-                    interestPriority: this.interestPriority(
-                        this._session.interestOrDefaultFor(paper, reviewer)
-                    )
+                    priority: bid
+                        ? bid.priority()
+                        : Bid.priorityFor(Interests.NotInterested),
+                    hasConflict: bid ? bid.hasConflict() : false
                 });
             });
         });
