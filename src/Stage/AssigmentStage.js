@@ -3,8 +3,12 @@ const RevisionStage = require("./RevisionStage");
 const Assigment = require("../Assigment");
 
 class AssigmentStage extends SessionStage {
+    canTransitionTo(nextStage) {
+        return nextStage instanceof RevisionStage;
+    }
+
     closeStage() {
-        this._Session._changeStage(new RevisionStage(this._Session));
+        this._Session.transitionTo(new RevisionStage(this._Session), this);
     }
 
     enterAssigment(paper, reviewer) {
