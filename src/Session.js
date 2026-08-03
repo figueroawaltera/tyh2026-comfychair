@@ -1,4 +1,5 @@
 const { Interests } = require("./Bid");
+const SessionStage = require("./Stage/SessionStage");
 const ReceivingStage = require("./Stage/ReceivingStage");
 const AcceptanceByPercentage = require("./policies/AcceptanceByPercentage");
 
@@ -25,8 +26,29 @@ class Session {
 
     acceptancePolicy() { return this._acceptancePolicy; }
 
-    _changeStage(stage) {
-        this._stage = stage;
+    transitionTo(nextStage, requestedBy) {
+        if (requestedBy !== this._stage) {
+            throw new Error(
+                "La transición solo puede ser solicitada por el estado actual."
+            );
+        }
+
+        if (!(nextStage instanceof SessionStage)) {
+            throw new Error("El destino debe ser un estado válido de Session.");
+        }
+
+        if (!nextStage.belongsTo(this)) {
+            throw new Error("El estado de destino pertenece a otra sesión.");
+        }
+
+        if (!this._stage.canTransitionTo(nextStage)) {
+            throw new Error(
+                `Transición no permitida: ${this._stage.constructor.name} → ` +
+                `${nextStage.constructor.name}`
+            );
+        }
+
+        this._stage = nextStage;
     }
 
     closeStage() {
