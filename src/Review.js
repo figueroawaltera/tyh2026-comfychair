@@ -1,30 +1,39 @@
-class Review{
-    constructor(reviewer, text, score){
+class Review {
+    constructor(reviewer, text, score) {
         this._reviewer = reviewer;
         this._text = text;
-
-        if (score <= 3 && score >= -3) 
-            this._score = score;
-        else
-            throw(new Error("Score no permitido."))
+        this._score = Review.validateScore(score);
     }
-    reviewer(){
+
+    static validateScore(score) {
+        if (score < -3 || score > 3) {
+            throw new Error("Score no permitido.");
+        }
+        return score;
+    }
+
+    isFrom(reviewer) {
+        return this._reviewer === reviewer;
+    }
+
+    reviewer() {
         return this._reviewer;
     }
-    text(){
+
+    text() {
         return this._text;
     }
-    score(){
+
+    score() {
         return this._score;
     }
-    setScore(score){
-        if (score <= 3 && score >= -3) 
-            this._score = score;
-        else
-            throw(new Error("Score no permitido."))
+
+    setScore(score) {
+        this._score = Review.validateScore(score);
     }
-    setReview(review){
-        this._text = review;
+
+    setReview(text) {
+        this._text = text;
     }
 }
 
