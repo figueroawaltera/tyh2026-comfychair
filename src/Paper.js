@@ -1,86 +1,122 @@
 const Review = require("./Review");
 
-class Paper{
-    constructor(title, authors, correspondingAuthor){
-        if(!authors.includes(correspondingAuthor)) throw new Error("Corresponding author must be an author");
+class Paper {
+    constructor(title, authors, correspondingAuthor) {
+        if (!authors.includes(correspondingAuthor)) {
+            throw new Error("Corresponding author must be an author");
+        }
+
         this._title = title;
         this._reviews = [];
         this._authors = authors;
         this._correspondingAuthor = correspondingAuthor;
         this._accepted = false;
-        this.reviewrsAssigned = 0;
+        this._reviewersAssigned = 0;
     }
-    title(){
+
+    title() {
         return this._title;
     }
-    authors(){
+
+    authors() {
         return this._authors;
     }
-    correspondingAuthor(){
+
+    correspondingAuthor() {
         return this._correspondingAuthor;
     }
-    reviews(){
+
+    reviews() {
         return this._reviews;
     }
-    isValid(){
-        return (this._title !== "") && (this._authors.length > 0);
+
+    isValid() {
+        return this._title !== "" && this._authors.length > 0;
     }
-    addReview(reviewer, review, score){
-        if (this.reviewsCount() < this.constructor.allowedReviews)
-            this._reviews.push(new Review(reviewer, review, score));
-        else throw(new Error("Cannot allow any more reviews"))
+
+    hasAuthor(user) {
+        return this._authors.includes(user);
     }
-    reviewsCount(){
-        return this.reviews().length;
+
+    hasAssignmentCapacity() {
+        return this._reviewersAssigned < Paper.allowedReviews;
     }
-    score(){
-        let sum = this.reviews().reduce( (partialSum, review) => partialSum + review.score(), 0 );
-        if (this.reviewsCount() > 0){
-            return sum / this.reviewsCount();
-        }else{
-            return 0;
+
+    canBeReviewedBy(reviewer) {
+        return Boolean(
+            reviewer &&
+            typeof reviewer.canAcceptAssignment === "function" &&
+            this.hasAssignmentCapacity() &&
+            reviewer.canAcceptAssignment() &&
+            !this.hasAuthor(reviewer)
+        );
+    }
+
+    assignReviewer(reviewer) {
+        if (!this.canBeReviewedBy(reviewer)) {
+            throw new Error("El reviewer no puede ser asignado a este paper.");
         }
-        
+        this._reviewersAssigned += 1;
     }
 
-    finalScore(){
-        let sum = this.reviews().reduce( (partialSum, review) => partialSum + review.score(), 0 );
-        if (this.reviewsCount() < 3){
-            sum += (3 - this.reviewsCount()) * -3
-            return sum / 3
-        } else {
-            return sum / this.reviewsCount();
+    reviewersAssigned() {
+        return this._reviewersAssigned;
+    }
+
+    addReview(reviewer, review, score) {
+        if (this.reviewsCount() >= Paper.allowedReviews) {
+            throw new Error("Cannot allow any more reviews");
         }
+        this._reviews.push(new Review(reviewer, review, score));
     }
 
-    reviewFor(reviewer){
-        return this._reviews.find( (suspect) => (suspect.reviewer()==reviewer));
+    reviewsCount() {
+        return this._reviews.length;
     }
 
-    reviewExistsFor(reviewer){
-        return typeof(this.reviewFor(reviewer)) != "undefined";
+    score() {
+        if (this.reviewsCount() === 0) return 0;
+
+        const sum = this._reviews.reduce(
+            (partialSum, review) => partialSum + review.score(),
+            0
+        );
+        return sum / this.reviewsCount();
     }
 
-    acceptPaper(){
-        this._accepted = true
+    finalScore() {
+        let sum = this._reviews.reduce(
+            (partialSum, review) => partialSum + review.score(),
+            0
+        );
+
+        if (this.reviewsCount() < Paper.allowedReviews) {
+            sum += (Paper.allowedReviews - this.reviewsCount()) * -3;
+            return sum / Paper.allowedReviews;
+        }
+
+        return sum / this.reviewsCount();
     }
 
-    declinePaper(){
-        this._accepted = false
+    reviewFor(reviewer) {
+        return this._reviews.find((review) => review.isFrom(reviewer));
     }
 
-    isAccepted(){
-        return this._accepted
+    reviewExistsFor(reviewer) {
+        return typeof this.reviewFor(reviewer) !== "undefined";
     }
 
-    addReviewerAssigned(){
-        this.reviewrsAssigned++;
-    }
-    
-    getReviewersAssigned(){
-        return this.reviewrsAssigned;
+    acceptPaper() {
+        this._accepted = true;
     }
 
+    declinePaper() {
+        this._accepted = false;
+    }
+
+    isAccepted() {
+        return this._accepted;
+    }
 }
 
 Paper.allowedReviews = 3;
