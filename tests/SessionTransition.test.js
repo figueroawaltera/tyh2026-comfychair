@@ -1,7 +1,7 @@
 const Session = require("../src/Session");
 const ReceivingStage = require("../src/Stage/ReceivingStage");
 const BiddingStage = require("../src/Stage/BiddingStage");
-const AssigmentStage = require("../src/Stage/AssigmentStage");
+const AssignmentStage = require("../src/Stage/AssignmentStage");
 const RevisionStage = require("../src/Stage/RevisionStage");
 const SelectionStage = require("../src/Stage/SelectionStage");
 
@@ -15,7 +15,7 @@ describe("Transiciones de Session", () => {
         expect(session._stage).toBeInstanceOf(BiddingStage);
 
         session.closeStage();
-        expect(session._stage).toBeInstanceOf(AssigmentStage);
+        expect(session._stage).toBeInstanceOf(AssignmentStage);
 
         session.closeStage();
         expect(session._stage).toBeInstanceOf(RevisionStage);
