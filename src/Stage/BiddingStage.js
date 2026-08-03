@@ -3,8 +3,12 @@ const AssigmentStage = require("./AssigmentStage");
 const { Bid } = require("../Bid");
 
 class BiddingStage extends SessionStage {
+    canTransitionTo(nextStage) {
+        return nextStage instanceof AssigmentStage;
+    }
+
     closeStage() {
-        this._Session._changeStage(new AssigmentStage(this._Session));
+        this._Session.transitionTo(new AssigmentStage(this._Session), this);
     }
 
     enterBid(paper, reviewer, interest) {
