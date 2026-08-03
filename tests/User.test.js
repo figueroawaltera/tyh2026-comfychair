@@ -1,22 +1,25 @@
 const User = require("../src/User");
-const crypto = require('crypto');
+const crypto = require("crypto");
 
-let juan;
+describe("User", () => {
+    test("almacena la clave encriptada", () => {
+        const user = new User(
+            "Juan Gardey", "LIFIA, UNLP", "jgardey@lifia.ar", "123"
+        );
+        const expectedHash = crypto
+            .createHash("sha256")
+            .update("123")
+            .digest("base64");
 
-beforeEach(()=>{
-    juan = new User("Juan Gardey", "LIFIA, UNLP", "jgardey@lifia.ar", "123");
-})
+        expect(user.getEncryptedPassword()).toBe(expectedHash);
+    });
 
-describe("Un usuario", () =>{
-    it("deberia tener su clave encriptada", () => {
-        const hashEsperado =
-            crypto
-                .createHash('sha256')
-                .update("123")
-                .digest('base64');
+    test("no contiene comportamiento exclusivo de Reviewer", () => {
+        const user = new User("User", "Universidad", "user@mail.com", "pass");
 
-        expect(
-            juan.getEncryptedPassword()
-        ).toBe(hashEsperado);
-    })
-})
+        expect(user.assignPaper).toBeUndefined();
+        expect(user.papersAssigned).toBeUndefined();
+        expect(user.canAcceptAssignment).toBeUndefined();
+        expect(user.setWorkload).toBeUndefined();
+    });
+});
