@@ -1,28 +1,36 @@
 const User = require("./User");
 
 class Reviewer extends User {
-    constructor(fullName, affiliation, email, password){
+    constructor(fullName, affiliation, email, password) {
         super(fullName, affiliation, email, password);
-        this.papersAssigned = 0;
-        this.workload = 1;
+        this._papersAssigned = 0;
+        this._workload = 1;
     }
 
-    setWorkload(workload){
-        if(workload > 0) {
-            this.workload = workload;
+    setWorkload(workload) {
+        if (!Number.isInteger(workload) || workload < 0) {
+            throw new Error("La carga de revisiones debe ser un entero no negativo.");
         }
+        this._workload = Math.max(1, workload);
     }
 
-    getWorkload(){
-        return this.workload;
+    workload() {
+        return this._workload;
     }
 
-    acceptPapers() {
-        return this.papersAssigned < this.workload;
+    canAcceptAssignment() {
+        return this._papersAssigned < this._workload;
     }
 
-    isAuthor(authors){
-        return authors.includes(this);
+    assignPaper() {
+        if (!this.canAcceptAssignment()) {
+            throw new Error("El reviewer alcanzó su carga máxima.");
+        }
+        this._papersAssigned += 1;
+    }
+
+    papersAssigned() {
+        return this._papersAssigned;
     }
 }
 
