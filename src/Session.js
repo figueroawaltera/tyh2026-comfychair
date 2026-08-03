@@ -99,21 +99,22 @@ class Session {
         this._programCommittee.push(user);
     }
 
+    addAssignment(assignment) {
+        this._assignments.push(assignment);
+    }
+
     assignmentsForPaper(paper) {
         return this._assignments.filter(
-            (assignment) => assignment.paper() === paper
+            (assignment) => assignment.isForPaper(paper)
         ).length;
     }
 
     bidExistsFor(paper, reviewer) {
-        return typeof(this.bidFor(paper, reviewer)) !== "undefined";
+        return typeof this.bidFor(paper, reviewer) !== "undefined";
     }
 
     bidFor(paper, reviewer) {
-        return this._bids.find(
-            (candidate) =>
-                candidate.paper() === paper && candidate.reviewer() === reviewer
-        );
+        return this._bids.find((bid) => bid.matches(paper, reviewer));
     }
 
     interestFor(paper, reviewer) {
@@ -128,13 +129,12 @@ class Session {
     }
 
     assignmentExistsFor(paper, reviewer) {
-        return typeof(this.assignmentFor(paper, reviewer)) !== "undefined";
+        return typeof this.assignmentFor(paper, reviewer) !== "undefined";
     }
 
     assignmentFor(paper, reviewer) {
         return this._assignments.find(
-            (candidate) =>
-                candidate.paper() === paper && candidate.reviewer() === reviewer
+            (assignment) => assignment.matches(paper, reviewer)
         );
     }
 
