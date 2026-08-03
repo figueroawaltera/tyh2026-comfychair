@@ -11,12 +11,14 @@ class ReceivingStage extends SessionStage {
     }
 
     submit(paper) {
-        if (!this.canSubmit(paper)) throw new Error("Cannot submit invalid paper");
-        this._Session.papers().push(paper);
+        if (!this.canSubmit(paper)) {
+            throw new Error("Cannot submit invalid paper");
+        }
+        this._session.papers().push(paper);
     }
 
     closeStage() {
-        this._Session.transitionTo(new BiddingStage(this._Session), this);
+        this._session.transitionTo(new BiddingStage(this._session), this);
     }
 }
 
