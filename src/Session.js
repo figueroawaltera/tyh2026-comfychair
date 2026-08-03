@@ -36,6 +36,7 @@ class Session{
         return this._assignments
     }
 
+    /** @deprecated Usar la API pública de Session en lugar de acceder directamente al estado. */
     stage(){
         return this._stage
     }
@@ -51,6 +52,42 @@ class Session{
 
     changeStage(Stage){
         this._stage = Stage
+    }
+
+    closeStage(){
+        return this._stage.closeStage();
+    }
+
+    canSubmit(paper){
+        return this._stage.canSubmit(paper);
+    }
+
+    submit(paper){
+        return this._stage.submit(paper);
+    }
+
+    enterBid(paper, reviewer, interest){
+        return this._stage.enterBid(paper, reviewer, interest);
+    }
+
+    enterAssigment(paper, reviewer){
+        return this._stage.enterAssigment(paper, reviewer);
+    }
+
+    asignarRevisores(){
+        return this._stage.asignarRevisores();
+    }
+
+    enterReview(paper, reviewer, review, score){
+        return this._stage.enterReview(paper, reviewer, review, score);
+    }
+
+    obtenerArticulosOrdenadosPorScore(){
+        return this._stage.obtenerArticulosOrdenadosPorScore();
+    }
+
+    obtenerArticulosAceptados(){
+        return this._stage.obtenerArticulosAceptados();
     }
 
     /** @deprecated Usar setAcceptancePolicy() con una instancia de AcceptanceByPercentage en su lugar. */
