@@ -1,33 +1,22 @@
 const SessionStage = require("./SessionStage");
 const RevisionStage = require("./RevisionStage");
 const Assigment = require("../Assigment");
-const {Interests} = require("../Bid");
 
-class AssigmentStage extends SessionStage{
-    constructor(Session){
-        super(Session);
+class AssigmentStage extends SessionStage {
+    closeStage() {
+        this._Session._changeStage(new RevisionStage(this._Session));
     }
 
-    closeStage(){
-        let newStage = new RevisionStage(this._Session)
-        this._Session.changeStage(newStage)
-        return newStage
-    }
-
-    enterAssigment(paper, reviewer){
-        if (!this._Session.assigmentExistsFor(paper, reviewer)){
-            paper.addReviewerAssigned();
-            reviewer.setPapersAssigned();
-            let asignacion = new Assigment(paper, reviewer);
-            this._Session.assignments().push(asignacion);
+    enterAssigment(paper, reviewer) {
+        if (this._Session.assigmentExistsFor(paper, reviewer)) {
+            throw new Error(
+                "Asignación ya existe para el par (paper,reviewer) ingresado."
+            );
         }
-        else throw new Error("Asignación ya existe para el par (paper,reviewer) ingresado.");        
-    }
 
-    interestPriority(interest){
-        if(interest === Interests.Interested) return 2;
-        if(interest === Interests.Maybe) return 1;
-        return 0;
+        paper.addReviewerAssigned();
+        reviewer.setPapersAssigned();
+        this._Session.assignments().push(new Assigment(paper, reviewer));
     }
 
     asignarRevisores() {
@@ -36,7 +25,11 @@ class AssigmentStage extends SessionStage{
             .sort((a, b) => b.interest - a.interest);
 
         for (const { paper, reviewer } of candidates) {
-            if (paper.getReviewersAssigned() < 3 && reviewer.acceptPapers() && !reviewer.isAuthor(paper.authors())) {
+            if (
+                paper.getReviewersAssigned() < 3 &&
+                reviewer.acceptPapers() &&
+                !reviewer.isAuthor(paper.authors())
+            ) {
                 this.enterAssigment(paper, reviewer);
             }
         }
