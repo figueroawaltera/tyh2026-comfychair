@@ -7,16 +7,16 @@ class RevisionStage extends SessionStage {
     }
 
     closeStage() {
-        this._Session.transitionTo(new SelectionStage(this._Session), this);
+        this._session.transitionTo(new SelectionStage(this._session), this);
     }
 
     enterReview(paper, reviewer, review, score) {
-        if (!this._Session.assigmentExistsFor(paper, reviewer)) {
+        if (!this._session.assignmentExistsFor(paper, reviewer)) {
             throw new Error("Reviewer no autorizado.");
         }
 
         if (paper.reviewExistsFor(reviewer)) {
-            throw new Error("El reviewer ya ingreso una review para este paper.");
+            throw new Error("El reviewer ya ingresó una review para este paper.");
         }
 
         paper.addReview(reviewer, review, score);
