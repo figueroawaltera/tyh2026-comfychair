@@ -1,25 +1,16 @@
+const crypto = require("crypto");
 
-
-class User{
-    constructor(fullName, affiliation, email, password){
-        let crypto = require('crypto');
-        const hash = crypto.createHash('sha256');
+class User {
+    constructor(fullName, affiliation, email, password) {
+        const hash = crypto.createHash("sha256");
         this.fullName = fullName;
         this.affiliation = affiliation;
         this.email = email;
-        this.encryptedPassword = hash.update(password).digest('base64');
+        this.encryptedPassword = hash.update(password).digest("base64");
     }
 
-    getEncryptedPassword(){
+    getEncryptedPassword() {
         return this.encryptedPassword;
-    }
-
-    setPapersAssigned(){
-        this.papersAssigned++;
-    }
-
-    getPapersAssigned(){
-        return this.papersAssigned;
     }
 }
 
