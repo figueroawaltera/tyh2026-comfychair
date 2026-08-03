@@ -1,20 +1,21 @@
 const SessionStage = require("./SessionStage");
 
-class SelectionStage extends SessionStage{
-    constructor(Session){
-        super(Session);
+class SelectionStage extends SessionStage {
+    closeStage() {
+        throw new Error("La sesión ya se encuentra en la etapa final de selección.");
     }
 
-    obtenerArticulosOrdenadosPorScore(){
-        let ordenados = [...this._Session.papers()];
-        ordenados.sort(function(a, b){ return b.finalScore() - a.finalScore(); });
+    obtenerArticulosOrdenadosPorScore() {
+        const ordenados = [...this._Session.papers()];
+        ordenados.sort((a, b) => b.finalScore() - a.finalScore());
         return ordenados;
     }
 
-    obtenerArticulosAceptados(){
-        return this._Session.acceptancePolicy().seleccionarArticulos(this._Session.papers());
+    obtenerArticulosAceptados() {
+        return this._Session.acceptancePolicy().seleccionarArticulos(
+            this._Session.papers()
+        );
     }
-
 }
 
 module.exports = SelectionStage;
