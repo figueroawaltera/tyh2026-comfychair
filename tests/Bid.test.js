@@ -14,6 +14,14 @@ describe("Bid", () => {
         return { bid: new Bid(paper, reviewer, interest), paper, reviewer };
     };
 
+    test("expone los participantes y el interés del bid", () => {
+        const { bid, paper, reviewer } = buildBid(Interests.Maybe);
+
+        expect(bid.paper()).toBe(paper);
+        expect(bid.reviewer()).toBe(reviewer);
+        expect(bid.interest()).toBe(Interests.Maybe);
+    });
+
     test("reconoce la pareja paper-reviewer que representa", () => {
         const { bid, paper, reviewer } = buildBid();
 
