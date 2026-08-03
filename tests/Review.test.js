@@ -10,9 +10,10 @@ describe("Review", () => {
         review = new Review(reviewer, "Texto de review", 0);
     });
 
-    test("reconoce al reviewer que la realizó", () => {
+    test("reconoce y expone al reviewer que la realizó", () => {
         const other = new User("User 2", "Uni 2", "u2@mail.com", "pass");
 
+        expect(review.reviewer()).toBe(reviewer);
         expect(review.isFrom(reviewer)).toBe(true);
         expect(review.isFrom(other)).toBe(false);
     });
