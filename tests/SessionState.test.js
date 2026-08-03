@@ -3,104 +3,71 @@ const Reviewer = require("../src/Reviewer");
 const Paper = require("../src/Paper");
 const { Interests } = require("../src/Bid");
 
-function createValidPaper(title = "Paper válido") {
-    const author = new Reviewer("Autor", "Universidad", "autor@mail.com", "pass");
-    return {
-        author,
-        paper: new Paper(title, [author], author)
-    };
+function buildAssignmentScenario() {
+    const session = new Session();
+    const author = new Reviewer("Autor", "Universidad", "author@mail.com", "pass");
+    const article = new Paper("Paper", [author], author);
+    const reviewers = [
+        new Reviewer("R1", "Universidad", "r1@mail.com", "pass"),
+        new Reviewer("R2", "Universidad", "r2@mail.com", "pass"),
+        new Reviewer("R3", "Universidad", "r3@mail.com", "pass")
+    ];
+
+    reviewers.forEach((reviewer) => session.addReviewer(reviewer));
+    session.submit(article);
+    session.closeStage();
+    reviewers.forEach((reviewer) =>
+        session.enterBid(article, reviewer, Interests.Interested)
+    );
+    session.closeStage();
+
+    return { session, article, reviewers };
 }
 
-describe("Session como contexto del patrón State", () => {
-    it("delega la recepción de artículos al estado actual", () => {
+describe("Responsabilidades de Session y AssignmentStage", () => {
+    test("Session expone únicamente la API corregida de asignación", () => {
         const session = new Session();
-        const { paper } = createValidPaper();
 
-        expect(session.canSubmit(paper)).toBe(true);
-        session.submit(paper);
+        expect(typeof session.enterAssignment).toBe("function");
+        expect(typeof session.assignReviewers).toBe("function");
+        expect(typeof session.assignmentExistsFor).toBe("function");
+        expect(typeof session.assignmentFor).toBe("function");
+        expect(typeof session.assignmentsForPaper).toBe("function");
 
-        expect(session.papers()).toContain(paper);
+        expect(session.enterAssigment).toBeUndefined();
+        expect(session.asignarRevisores).toBeUndefined();
+        expect(session.assigmentExistsFor).toBeUndefined();
+        expect(session.assigmentFor).toBeUndefined();
+        expect(session.assigmentsPapers).toBeUndefined();
     });
 
-    it("rechaza operaciones que no corresponden al estado actual", () => {
+    test("la generación y prioridad de candidatos no pertenecen a Session", () => {
         const session = new Session();
-        const { paper } = createValidPaper();
-        const reviewer = new Reviewer("Revisor", "Universidad", "reviewer@mail.com", "pass");
 
-        expect(() => session.enterBid(paper, reviewer, Interests.Interested)).toThrow();
-        expect(() => session.enterAssigment(paper, reviewer)).toThrow();
-        expect(() => session.enterReview(paper, reviewer, "Review", 2)).toThrow();
+        expect(session.interestPriority).toBeUndefined();
+        expect(session.candidatesForAssignment).toBeUndefined();
     });
 
-    it("permite avanzar de recepción a bidding sin exponer el objeto estado", () => {
-        const session = new Session();
-        const { paper } = createValidPaper();
-        const reviewer = new Reviewer("Revisor", "Universidad", "reviewer@mail.com", "pass");
+    test("AssignmentStage conserva el comportamiento de asignación", () => {
+        const { session, article, reviewers } = buildAssignmentScenario();
 
-        session.submit(paper);
-        session.closeStage();
-        session.enterBid(paper, reviewer, Interests.Interested);
+        session.assignReviewers();
 
-        expect(session.bidExistsFor(paper, reviewer)).toBe(true);
-        expect(session.interestFor(paper, reviewer)).toBe(Interests.Interested);
-        expect(session.canSubmit(paper)).toBe(false);
-        expect(() => session.submit(paper)).toThrow();
+        expect(session.assignmentsForPaper(article)).toBe(3);
+        reviewers.forEach((reviewer) =>
+            expect(session.assignmentExistsFor(article, reviewer)).toBe(true)
+        );
     });
 
-    it("delega la asignación de revisores solamente durante assignment", () => {
-        const session = new Session();
-        const { author, paper } = createValidPaper();
-        const reviewer1 = new Reviewer("Revisor 1", "Universidad", "r1@mail.com", "pass");
-        const reviewer2 = new Reviewer("Revisor 2", "Universidad", "r2@mail.com", "pass");
-        const reviewer3 = new Reviewer("Revisor 3", "Universidad", "r3@mail.com", "pass");
+    test("Session delega una asignación manual solo durante assignment", () => {
+        const { session, article, reviewers } = buildAssignmentScenario();
 
-        session.addReviewer(reviewer1);
-        session.addReviewer(reviewer2);
-        session.addReviewer(reviewer3);
-        session.addReviewer(author);
+        session.enterAssignment(article, reviewers[0]);
+        expect(session.assignmentFor(article, reviewers[0]).paper()).toBe(article);
 
-        session.submit(paper);
         session.closeStage();
-        session.enterBid(paper, reviewer1, Interests.Interested);
-        session.enterBid(paper, reviewer2, Interests.Interested);
-        session.enterBid(paper, reviewer3, Interests.Maybe);
-        session.closeStage();
-        session.asignarRevisores();
-
-        expect(session.assigmentExistsFor(paper, reviewer1)).toBe(true);
-        expect(session.assigmentExistsFor(paper, reviewer2)).toBe(true);
-        expect(session.assigmentExistsFor(paper, reviewer3)).toBe(true);
-        expect(session.assigmentExistsFor(paper, author)).toBe(false);
-    });
-
-    it("delega el ingreso de reviews solamente durante revision", () => {
-        const session = new Session();
-        const { paper } = createValidPaper();
-        const reviewer = new Reviewer("Revisor", "Universidad", "reviewer@mail.com", "pass");
-
-        session.addReviewer(reviewer);
-        session.submit(paper);
-        session.closeStage();
-        session.enterBid(paper, reviewer, Interests.Interested);
-        session.closeStage();
-        session.enterAssigment(paper, reviewer);
-        session.closeStage();
-        session.enterReview(paper, reviewer, "Buen trabajo", 2);
-
-        expect(paper.reviews()).toHaveLength(1);
-    });
-
-    it("delega la selección de artículos solamente durante selection", () => {
-        const session = new Session();
-        const { paper } = createValidPaper();
-
-        session.submit(paper);
-        session.closeStage();
-        session.closeStage();
-        session.closeStage();
-        session.closeStage();
-
-        expect(session.obtenerArticulosOrdenadosPorScore()).toEqual([paper]);
-        expect(session.obtenerArticulosAceptados()).toEqual(expect.any(Array));
+        expect(() =>
+            session.enterAssignment(article, reviewers[1])
+        ).toThrow();
     });
 });
